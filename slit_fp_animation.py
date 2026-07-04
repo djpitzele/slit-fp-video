@@ -55,19 +55,29 @@ STAGE1 = {
     "cone_fill_opacity": 0.15,
     "outline_color": WHITE,
     "outline_width": 3.0,
+    # Vertical stack (top -> bottom): camera, aperture (pinhole), lens, sample, source.
     "camera_center": np.array([0.0, 2.6, 0.0]),
     "camera_body_w": 2.4,
     "camera_body_h": 1.3,
-    "lens_w": 1.0,
-    "lens_h": 0.5,
-    "sample_y": 0.4,                 # y of the sample slide
-    "sample_w": 3.2,
-    "sample_h": 0.12,
-    "aperture_y": -0.5,              # y of the small aperture
-    "aperture_w": 0.5,
+    "cam_lens_w": 1.0,               # camera lens trapezoid (the light expands into this)
+    "cam_lens_h": 0.5,
+    # Aperture: top thin rectangle split by a narrow central pinhole.
+    "aperture_y": 0.7,
+    "aperture_w": 3.2,
     "aperture_h": 0.12,
-    "source_y": -3.2,                # y of the illumination source (below aperture)
-    "spread_on_sample": 1.2,         # half-width of the cone where it hits the sample
+    "aperture_pinhole": 0.12,        # narrow central gap (pinhole)
+    # Optical lens: transparent oval between the sample and the aperture.
+    "lens_y": -0.35,
+    "lens_rx": 0.85,                 # horizontal radius (half-width)
+    "lens_ry": 0.32,                 # vertical radius (half-height)
+    "lens_color": BLUE_C,
+    "lens_fill_opacity": 0.12,
+    # Sample: bottom thin rectangle (light fills exactly its width).
+    "sample_y": -1.7,
+    "sample_w": 1.2,
+    "sample_h": 0.12,
+    # Illumination source at the very bottom.
+    "source_y": -3.4,
 }
 
 # ---- Stage 2: building a rounded rectangle from frequency-space circles ------
@@ -338,39 +348,83 @@ def build_slit_circle(cfg=STAGE6):
 # Stage 1 - Illumination
 # =============================================================================
 def _light_cone(angle_deg, cfg):
-    """Green cone polygon from the (angled) source, through the aperture, onto sample."""
-    src = np.array([math.tan(math.radians(angle_deg)) * (cfg["aperture_y"] - cfg["source_y"]),
+    """Green light path, bottom to top:
+      1. source -> sample: a cone whose edges land on the sample edges (no spill),
+      2. sample -> lens: collimated at the sample width (stays within the sample),
+      3. lens -> pinhole: angled inward, converging onto the aperture pinhole,
+      4. pinhole -> camera: a fresh cone expanding out into the camera lens.
+    Only segment 1 changes with the illumination angle; the rest is fixed."""
+    swh = cfg["sample_w"] / 2.0
+    sy = cfg["sample_y"]
+    ly = cfg["lens_y"]
+    ay = cfg["aperture_y"]
+
+    # Key points along the path. Only the source moves with the illumination angle.
+    src = np.array([math.tan(math.radians(angle_deg)) * (sy - cfg["source_y"]),
                     cfg["source_y"], 0.0])
-    sample_cx = 0.0
-    base_l = np.array([sample_cx - cfg["spread_on_sample"], cfg["sample_y"], 0.0])
-    base_r = np.array([sample_cx + cfg["spread_on_sample"], cfg["sample_y"], 0.0])
-    cone = Polygon(src, base_l, base_r)
-    cone.set_stroke(cfg["cone_stroke"], width=cfg["cone_stroke_width"])
-    cone.set_fill(cfg["cone_fill"], opacity=cfg["cone_fill_opacity"])
-    return cone
+    s_l = np.array([-swh, sy, 0.0])           # sample edges
+    s_r = np.array([swh, sy, 0.0])
+    l_l = np.array([-swh, ly, 0.0])           # lens (collimated up to here)
+    l_r = np.array([swh, ly, 0.0])
+    ph = cfg["aperture_pinhole"] / 2.0
+    p_l = np.array([-ph, ay, 0.0])            # pinhole
+    p_r = np.array([ph, ay, 0.0])
+    cam_y = cfg["camera_center"][1] - cfg["camera_body_h"] / 2.0 - cfg["cam_lens_h"]
+    ch = cfg["cam_lens_w"] / 2.0
+    c_l = np.array([-ch, cam_y, 0.0])         # camera lens opening
+    c_r = np.array([ch, cam_y, 0.0])
+
+    left_pts = [src, s_l, l_l, p_l, c_l]
+    right_pts = [src, s_r, l_r, p_r, c_r]
+
+    # Continuous fill for the whole beam (up the left edge, across, down the right).
+    fill = Polygon(*(left_pts + right_pts[::-1]))
+    fill.set_stroke(width=0.0)
+    fill.set_fill(cfg["cone_fill"], opacity=cfg["cone_fill_opacity"])
+
+    # Strong green outline only along the two side edges (no horizontal junctions).
+    left_edge = VMobject().set_points_as_corners(left_pts)
+    right_edge = VMobject().set_points_as_corners(right_pts)
+    for edge in (left_edge, right_edge):
+        edge.set_stroke(cfg["cone_stroke"], width=cfg["cone_stroke_width"])
+
+    return VGroup(fill, left_edge, right_edge)
 
 
 def build_optics_diagram(cfg=STAGE1):
-    """2D outline: camera (looking down) + sample slide + small aperture."""
+    """2D outline: camera (looking down) + aperture with a pinhole + oval lens + sample."""
     body = Rectangle(width=cfg["camera_body_w"], height=cfg["camera_body_h"],
                      color=cfg["outline_color"], stroke_width=cfg["outline_width"])
     body.move_to(cfg["camera_center"])
-    lens = Polygon(
-        body.get_corner(DL) + RIGHT * (cfg["camera_body_w"] / 2 - cfg["lens_w"] / 2),
-        body.get_corner(DR) + LEFT * (cfg["camera_body_w"] / 2 - cfg["lens_w"] / 2),
-        body.get_bottom() + DOWN * cfg["lens_h"] + RIGHT * cfg["lens_w"] / 2,
-        body.get_bottom() + DOWN * cfg["lens_h"] + LEFT * cfg["lens_w"] / 2,
+    cam_lens = Polygon(
+        body.get_corner(DL) + RIGHT * (cfg["camera_body_w"] / 2 - cfg["cam_lens_w"] / 2),
+        body.get_corner(DR) + LEFT * (cfg["camera_body_w"] / 2 - cfg["cam_lens_w"] / 2),
+        body.get_bottom() + DOWN * cfg["cam_lens_h"] + RIGHT * cfg["cam_lens_w"] / 2,
+        body.get_bottom() + DOWN * cfg["cam_lens_h"] + LEFT * cfg["cam_lens_w"] / 2,
         color=cfg["outline_color"], stroke_width=cfg["outline_width"],
     )
+    # Aperture plate split into two halves by a narrow central pinhole.
+    ap_half_w = (cfg["aperture_w"] - cfg["aperture_pinhole"]) / 2.0
+    ap_half_cx = cfg["aperture_pinhole"] / 2.0 + ap_half_w / 2.0
+    aperture_left = Rectangle(width=ap_half_w, height=cfg["aperture_h"],
+                              color=cfg["outline_color"], stroke_width=cfg["outline_width"])
+    aperture_left.set_fill(cfg["outline_color"], opacity=0.15)
+    aperture_left.move_to([-ap_half_cx, cfg["aperture_y"], 0.0])
+    aperture_right = Rectangle(width=ap_half_w, height=cfg["aperture_h"],
+                               color=cfg["outline_color"], stroke_width=cfg["outline_width"])
+    aperture_right.set_fill(cfg["outline_color"], opacity=0.15)
+    aperture_right.move_to([ap_half_cx, cfg["aperture_y"], 0.0])
+    # Optical lens: transparent oval between the sample and the aperture.
+    lens = Ellipse(width=2 * cfg["lens_rx"], height=2 * cfg["lens_ry"],
+                   color=cfg["lens_color"], stroke_width=cfg["outline_width"])
+    lens.set_fill(cfg["lens_color"], opacity=cfg["lens_fill_opacity"])
+    lens.move_to([0.0, cfg["lens_y"], 0.0])
+    # Sample: solid bottom thin rectangle.
     sample = Rectangle(width=cfg["sample_w"], height=cfg["sample_h"],
                        color=cfg["outline_color"], stroke_width=cfg["outline_width"])
     sample.set_fill(cfg["outline_color"], opacity=0.15)
     sample.move_to([0.0, cfg["sample_y"], 0.0])
-    aperture = Rectangle(width=cfg["aperture_w"], height=cfg["aperture_h"],
-                         color=cfg["outline_color"], stroke_width=cfg["outline_width"])
-    aperture.set_fill(cfg["outline_color"], opacity=0.15)
-    aperture.move_to([0.0, cfg["aperture_y"], 0.0])
-    return VGroup(body, lens, sample, aperture)
+    return VGroup(body, cam_lens, aperture_left, aperture_right, lens, sample)
 
 
 def run_stage1(scene, carry=None):
@@ -383,7 +437,11 @@ def run_stage1(scene, carry=None):
     for i, ang in enumerate(cfg["angles_deg"]):
         new_cone = _light_cone(ang, cfg)
         if cone is None:
-            scene.play(Create(new_cone), run_time=min(0.6, per_angle * 0.5))
+            # Draw the fill and both outlines together (no stagger between them).
+            scene.play(
+                AnimationGroup(*[Create(part) for part in new_cone], lag_ratio=0.0),
+                run_time=min(0.6, per_angle * 0.5),
+            )
         else:
             scene.play(Transform(cone, new_cone), run_time=min(0.6, per_angle * 0.5))
             new_cone = cone
