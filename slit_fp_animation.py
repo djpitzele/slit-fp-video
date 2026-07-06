@@ -153,14 +153,10 @@ STAGE7 = {
     "overlap_frac": 0.5,             # 0.5 => neighbours overlap 50%
     "step_time": 0.5,                # one new rectangle every step_time seconds
     "rect_fade_time": 0.2,
-    "image_paths": [
-        "assets/stage7_recon_1.png",
-        "assets/stage7_recon_2.png",
-        "assets/stage7_recon_3.png",
-    ],
+    # One image per bar (n = 1..n_rects); placeholders until real paths exist.
+    "image_path_template": "assets/stage7_recon_{n}.jpg",
     "img_width": 5.2,
     "img_height": 5.2,
-    "rects_per_image": 5,            # each image lasts this many rectangles
 }
 
 # ---- Stage 8: rotational slit stack -----------------------------------------
@@ -616,7 +612,8 @@ def _vertical_slit_rect(cfg):
 
 
 def _linear_offsets(n):
-    """Order 0, +1, -1, +2, -2, ... in half-width units (right then left)."""
+    """The same set of positions as the center-out layout, but returned in
+    left-to-right appearance order (leftmost bar first, rightmost last)."""
     order = [0]
     k = 1
     while len(order) < n:
@@ -624,7 +621,7 @@ def _linear_offsets(n):
         if len(order) < n:
             order.append(-k)
         k += 1
-    return order[:n]
+    return sorted(order[:n])
 
 
 def run_stage7(scene, carry=None):
@@ -645,18 +642,16 @@ def run_stage7(scene, carry=None):
     for i, off in enumerate(offsets):
         rect = _vertical_slit_rect(cfg).move_to(LEFT_HALF + RIGHT * off * step)
 
-        if i % cfg["rects_per_image"] == 0:
-            idx = min(i // cfg["rects_per_image"], len(cfg["image_paths"]) - 1)
-            new_img = placeholder_image(cfg["image_paths"][idx], f"Recon {idx + 1}",
-                                        cfg["img_width"], cfg["img_height"]).move_to(RIGHT_HALF)
-            if current_img is None:
-                scene.play(FadeIn(rect), FadeIn(new_img), run_time=cfg["rect_fade_time"])
-            else:
-                scene.play(FadeIn(rect), FadeOut(current_img), FadeIn(new_img),
-                           run_time=cfg["rect_fade_time"])
-            current_img = new_img
-        else:
-            scene.play(FadeIn(rect), run_time=cfg["rect_fade_time"])
+        # A separate image for each bar being added. Fade the new image in on top of
+        # the previous one (which stays fully opaque underneath), then drop the old
+        # one. This crossfades without the brightness dip of fading out + in at once.
+        path = cfg["image_path_template"].format(n=i + 1)
+        new_img = placeholder_image(path, f"Recon {i + 1}",
+                                    cfg["img_width"], cfg["img_height"]).move_to(RIGHT_HALF)
+        scene.play(FadeIn(rect), FadeIn(new_img), run_time=cfg["rect_fade_time"])
+        if current_img is not None:
+            scene.remove(current_img)
+        current_img = new_img
         scene.wait(hold)
 
     used = cfg["intro_time"] + cfg["n_rects"] * cfg["step_time"]
