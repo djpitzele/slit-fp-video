@@ -163,21 +163,18 @@ STAGE7 = {
 STAGE8 = {
     "duration": 8.4,
     "intro_time": 1.0,
-    "n_rects": 8,
-    "angle_step_deg": -22.5,         # negative => clockwise
-    "rect_width": 0.42,
+    "n_rects": 18,
+    "base_angle_deg": 90.0,          # first bar is horizontal
+    "angle_step_deg": -10.0,         # negative => clockwise; 18 bars fill ~180 deg
+    "rect_width": 0.2,               # thinner so late additions stay distinguishable
     "rect_height": 3.4,
     "rect_color": BLUE,
     "rect_stroke": 3.0,
     "rect_fade_time": 0.25,
-    "image_paths": [
-        "assets/stage8_recon_1.png",
-        "assets/stage8_recon_2.png",
-        "assets/stage8_recon_3.png",
-    ],
+    # One image per bar (n = 1..n_rects); placeholders until real paths exist.
+    "image_path_template": "assets/stage8_recon_{n}.png",
     "img_width": 5.2,
     "img_height": 5.2,
-    "image_swap_indices": [0, 3, 6],  # which rectangle index swaps the image
 }
 
 # ---- Stage 9: reconstruction pipeline ---------------------------------------
@@ -676,8 +673,10 @@ def run_stage8(scene, carry=None):
     cfg = STAGE8
     base = _vertical_slit_rect(cfg).move_to(LEFT_HALF)
     center = base.get_center()
+    # Start the first bar horizontal; subsequent bars rotate clockwise from it.
+    base.rotate(math.radians(cfg["base_angle_deg"]), about_point=center)
 
-    intro_img = placeholder_image(cfg["image_paths"][0], "Recon 1",
+    intro_img = placeholder_image(cfg["image_path_template"].format(n=1), "Recon 1",
                                   cfg["img_width"], cfg["img_height"]).move_to(RIGHT_HALF)
     scene.play(FadeIn(base), FadeIn(intro_img), run_time=cfg["intro_time"])
     current_img = intro_img
@@ -686,15 +685,15 @@ def run_stage8(scene, carry=None):
     hold = max(0.0, per_rect - cfg["rect_fade_time"])
     for i in range(1, cfg["n_rects"]):
         rect = base.copy().rotate(math.radians(cfg["angle_step_deg"] * i), about_point=center)
-        anims = [FadeIn(rect)]
-        if i in cfg["image_swap_indices"]:
-            idx = cfg["image_swap_indices"].index(i)
-            idx = min(idx, len(cfg["image_paths"]) - 1)
-            new_img = placeholder_image(cfg["image_paths"][idx], f"Recon {idx + 1}",
-                                        cfg["img_width"], cfg["img_height"]).move_to(RIGHT_HALF)
-            anims += [FadeOut(current_img), FadeIn(new_img)]
-            current_img = new_img
-        scene.play(*anims, run_time=cfg["rect_fade_time"])
+
+        # A separate image for each bar. Fade the new image in on top of the previous
+        # one (which stays opaque underneath), then drop the old one, so it crossfades
+        # without the brightness dip of fading out + in at once.
+        new_img = placeholder_image(cfg["image_path_template"].format(n=i + 1), f"Recon {i + 1}",
+                                    cfg["img_width"], cfg["img_height"]).move_to(RIGHT_HALF)
+        scene.play(FadeIn(rect), FadeIn(new_img), run_time=cfg["rect_fade_time"])
+        scene.remove(current_img)
+        current_img = new_img
         scene.wait(hold)
 
     fade_out_all(scene)
