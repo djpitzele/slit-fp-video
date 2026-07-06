@@ -183,14 +183,16 @@ STAGE8 = {
 # ---- Stage 9: reconstruction pipeline ---------------------------------------
 STAGE9 = {
     "duration": 6.5,
-    "row_center_x": -1.2,            # rows sit slightly left of center
+    "recon_right_x": 2.95,           # right edge of the recon images (just left of final)
+    "row_buff": 0.3,                 # horizontal spacing between elements in a row
+    "arrow_scale": 0.75,             # length of the arrow feeding the recon image
     "row_y": 1.7,                    # top row y (bottom row mirrors to -row_y)
     "step_delay": 0.5,               # delay between successive left-to-right reveals
     "final_delay": 3.0,              # seconds after rightmost images before final image
     "stack_img_width": 1.3,
     "stack_img_height": 1.1,
-    "large_img_width": 2.2,
-    "large_img_height": 1.8,
+    "large_img_width": 3.1,
+    "large_img_height": 2.55,
     "final_img_width": 3.0,
     "final_img_height": 3.4,
     "final_center": np.array([4.6, 0.0, 0.0]),
@@ -713,11 +715,14 @@ def _build_pipeline_row(cfg, y, imgs, labels):
     img1 = placeholder_image(imgs[0], labels[0], cfg["stack_img_width"], cfg["stack_img_height"])
     dots = Text("· · ·", font_size=40)
     img2 = placeholder_image(imgs[1], labels[1], cfg["stack_img_width"], cfg["stack_img_height"])
-    arrow = Arrow(LEFT, RIGHT, buff=0.0).scale(0.8)
+    arrow = Arrow(LEFT, RIGHT, buff=0.0).scale(cfg["arrow_scale"])
     large = placeholder_image(imgs[2], labels[2], cfg["large_img_width"], cfg["large_img_height"])
 
-    row = Group(img1, dots, img2, arrow, large).arrange(RIGHT, buff=0.35)
-    row.move_to([cfg["row_center_x"], y, 0.0])
+    row = Group(img1, dots, img2, arrow, large).arrange(RIGHT, buff=cfg["row_buff"])
+    # Pin the recon (rightmost) image's right edge just left of the final image so that
+    # enlarging it and tightening the spacing pushes the rest of the row to the right.
+    row.shift(RIGHT * (cfg["recon_right_x"] - large.get_right()[0]))
+    row.set_y(y)
     return [img1, dots, img2, arrow, large]
 
 
