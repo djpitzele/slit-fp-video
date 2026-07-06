@@ -55,17 +55,23 @@ STAGE1 = {
     "cone_fill_opacity": 0.15,
     "outline_color": WHITE,
     "outline_width": 3.0,
-    # Vertical stack (top -> bottom): camera, aperture (pinhole), lens, sample, source.
-    "camera_center": np.array([0.0, 2.6, 0.0]),
-    "camera_body_w": 2.4,
-    "camera_body_h": 1.3,
-    "cam_lens_w": 1.0,               # camera lens trapezoid (the light expands into this)
-    "cam_lens_h": 0.5,
+    # Vertical stack (top -> bottom): camera image, aperture (pinhole), lens, sample, source.
+    # Camera: PNG icon rotated so its lens points down; the light expands into that lens.
+    "camera_image": "assets/cam-white.png",
+    "camera_width": 1.8,            # on-screen width of the (square) icon (2.6 * 0.6)
+    "camera_rotate_deg": -90,        # clockwise so the lens horn points down
+    "camera_src_px": 512,            # source PNG is 512x512
+    "camera_lens_axis_row": 351,     # row of the lens-horn axis in the source PNG
+    "camera_lens_tip_col": 511,      # column of the lens-horn tip in the source PNG
+    "camera_nudge": np.array([0.0, 0.0, 0.0]),   # fine-tune the icon placement
+    # These still define where the green beam expands to meet the camera lens.
+    "cam_lens_top_y": 1.45,          # y where the beam reaches the camera lens
+    "cam_lens_w": 0.7,               # beam width at the lens
     # Aperture: top thin rectangle split by a narrow central pinhole.
     "aperture_y": 0.7,
     "aperture_w": 3.2,
     "aperture_h": 0.12,
-    "aperture_pinhole": 0.12,        # narrow central gap (pinhole)
+    "aperture_pinhole": 0.02,        # narrow central gap (pinhole)
     # Optical lens: transparent oval between the sample and the aperture.
     "lens_y": -0.35,
     "lens_rx": 0.85,                 # horizontal radius (half-width)
@@ -76,6 +82,7 @@ STAGE1 = {
     "sample_y": -1.7,
     "sample_w": 1.2,
     "sample_h": 0.12,
+    "sample_color": RED,
     # Illumination source at the very bottom.
     "source_y": -3.4,
 }
@@ -85,10 +92,8 @@ STAGE2 = {
     "duration": 6.5,
     "circle_radius": 0.5,
     "overlap_spacing": 1.0,          # center-to-center distance as a fraction of radius
-    "region_half_w": 2.3,            # rounded-rect region the circles must fall inside
-    "region_half_h": 1.4,
-    "region_corner": 0.7,
-    "max_spiral": 800,               # spiral candidates generated before filtering
+    "grid_n": 7,                     # circles per row and per column (use an odd number)
+    "max_spiral": 2000,              # spiral candidates generated before filtering
     "outline_color": BLUE,
     "stroke_width": 3.0,
     "lag_ratio": 0.9,                # how staggered the sequential Create() is
@@ -272,30 +277,19 @@ def _spiral_coords(n):
     return pts
 
 
-def _inside_rounded_rect(x, y, a, b, cr):
-    ax, ay = abs(x), abs(y)
-    if ax > a or ay > b:
-        return False
-    if ax <= a - cr or ay <= b - cr:
-        return True
-    dx = ax - (a - cr)
-    dy = ay - (b - cr)
-    return dx * dx + dy * dy <= cr * cr
-
-
 def build_frequency_circles(cfg=STAGE2):
-    """VGroup of overlapping blue-outline circles, ordered as a CCW spiral,
-    filling a rounded-rectangle region. Reused by Stage 2 (built) and Stage 4."""
+    """VGroup of overlapping blue-outline circles forming a square N x N grid
+    (same count per row and column), ordered as a CCW spiral out from the center.
+    Reused by Stage 2 (built) and Stage 4."""
     r = cfg["circle_radius"]
     spacing = cfg["overlap_spacing"] * r
-    a, b, cr = cfg["region_half_w"], cfg["region_half_h"], cfg["region_corner"]
+    k = (cfg["grid_n"] - 1) // 2          # half-extent of the square grid
     circles = VGroup()
     for (ix, iy) in _spiral_coords(cfg["max_spiral"]):
-        x, y = ix * spacing, iy * spacing
-        if _inside_rounded_rect(x, y, a, b, cr):
+        if abs(ix) <= k and abs(iy) <= k:
             c = Circle(radius=r, color=cfg["outline_color"], stroke_width=cfg["stroke_width"])
             c.set_fill(opacity=0.0)
-            c.move_to([x, y, 0.0])
+            c.move_to([ix * spacing, iy * spacing, 0.0])
             circles.add(c)
     circles.move_to(ORIGIN)
     return circles
@@ -369,7 +363,7 @@ def _light_cone(angle_deg, cfg):
     ph = cfg["aperture_pinhole"] / 2.0
     p_l = np.array([-ph, ay, 0.0])            # pinhole
     p_r = np.array([ph, ay, 0.0])
-    cam_y = cfg["camera_center"][1] - cfg["camera_body_h"] / 2.0 - cfg["cam_lens_h"]
+    cam_y = cfg["cam_lens_top_y"]
     ch = cfg["cam_lens_w"] / 2.0
     c_l = np.array([-ch, cam_y, 0.0])         # camera lens opening
     c_r = np.array([ch, cam_y, 0.0])
@@ -391,18 +385,27 @@ def _light_cone(angle_deg, cfg):
     return VGroup(fill, left_edge, right_edge)
 
 
+def build_camera_icon(cfg=STAGE1):
+    """The camera PNG rotated so its lens points down, positioned so the lens axis
+    sits on x=0 and the lens tip meets the top of the green beam."""
+    px = cfg["camera_src_px"]
+    s = cfg["camera_width"] / px
+    # After a 90 deg clockwise rotation, an image offset (ox, oy) maps to (oy, -ox).
+    # The lens-horn axis (source row R) becomes a vertical line; the tip (source
+    # column T) becomes the lowest point.
+    lens_axis_dx = -(cfg["camera_lens_axis_row"] - px / 2.0) * s
+    tip_dy = -(cfg["camera_lens_tip_col"] - px / 2.0) * s
+    center = np.array([-lens_axis_dx, cfg["cam_lens_top_y"] - tip_dy, 0.0]) + cfg["camera_nudge"]
+    camera = ImageMobject(cfg["camera_image"])
+    camera.set_width(cfg["camera_width"])
+    camera.rotate(cfg["camera_rotate_deg"] * DEGREES)
+    camera.move_to(center)
+    return camera
+
+
 def build_optics_diagram(cfg=STAGE1):
-    """2D outline: camera (looking down) + aperture with a pinhole + oval lens + sample."""
-    body = Rectangle(width=cfg["camera_body_w"], height=cfg["camera_body_h"],
-                     color=cfg["outline_color"], stroke_width=cfg["outline_width"])
-    body.move_to(cfg["camera_center"])
-    cam_lens = Polygon(
-        body.get_corner(DL) + RIGHT * (cfg["camera_body_w"] / 2 - cfg["cam_lens_w"] / 2),
-        body.get_corner(DR) + LEFT * (cfg["camera_body_w"] / 2 - cfg["cam_lens_w"] / 2),
-        body.get_bottom() + DOWN * cfg["cam_lens_h"] + RIGHT * cfg["cam_lens_w"] / 2,
-        body.get_bottom() + DOWN * cfg["cam_lens_h"] + LEFT * cfg["cam_lens_w"] / 2,
-        color=cfg["outline_color"], stroke_width=cfg["outline_width"],
-    )
+    """Camera icon + aperture with a pinhole + oval lens + sample bar."""
+    camera = build_camera_icon(cfg)
     # Aperture plate split into two halves by a narrow central pinhole.
     ap_half_w = (cfg["aperture_w"] - cfg["aperture_pinhole"]) / 2.0
     ap_half_cx = cfg["aperture_pinhole"] / 2.0 + ap_half_w / 2.0
@@ -419,18 +422,22 @@ def build_optics_diagram(cfg=STAGE1):
                    color=cfg["lens_color"], stroke_width=cfg["outline_width"])
     lens.set_fill(cfg["lens_color"], opacity=cfg["lens_fill_opacity"])
     lens.move_to([0.0, cfg["lens_y"], 0.0])
-    # Sample: solid bottom thin rectangle.
+    # Sample: solid bottom thin rectangle (red).
     sample = Rectangle(width=cfg["sample_w"], height=cfg["sample_h"],
-                       color=cfg["outline_color"], stroke_width=cfg["outline_width"])
-    sample.set_fill(cfg["outline_color"], opacity=0.15)
+                       color=cfg["sample_color"], stroke_width=cfg["outline_width"])
+    sample.set_fill(cfg["sample_color"], opacity=0.15)
     sample.move_to([0.0, cfg["sample_y"], 0.0])
-    return VGroup(body, cam_lens, aperture_left, aperture_right, lens, sample)
+    # Mixed media (ImageMobject + VMobjects) -> Group, not VGroup.
+    return Group(camera, aperture_left, aperture_right, lens, sample)
 
 
 def run_stage1(scene, carry=None):
     cfg = STAGE1
     diagram = build_optics_diagram(cfg)
-    scene.play(Create(diagram), run_time=0.8)
+    # Draw the optical elements; fade in the camera image (Create can't draw a PNG).
+    vparts = VGroup(*[m for m in diagram if not isinstance(m, ImageMobject)])
+    images = [m for m in diagram if isinstance(m, ImageMobject)]
+    scene.play(Create(vparts), *[FadeIn(m) for m in images], run_time=0.8)
 
     per_angle = (cfg["duration"] - 0.8) / len(cfg["angles_deg"])
     cone = None
