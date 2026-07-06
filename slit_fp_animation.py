@@ -526,8 +526,9 @@ def run_stage4(scene, carry=None):
     )
     scene.wait(max(0.0, cfg["duration"] - cfg["reappear_time"] - 1.0 - 1.8))
 
-    # Bring the two N's together into a bold N^2 above/right of the array.
-    center = circles.get_center() + UP * (circles.height / 2 + 1.2)
+    # Bring the two N's together into a bold N^2 at the top-right corner: in line
+    # with the top N (its height) and the right N (its x), clear of the grid/bars.
+    center = np.array([n_right.get_center()[0], n_top.get_center()[1], 0.0])
     n2 = Text("N²", font_size=cfg["n2_font_size"], weight=BOLD).move_to(center)
     n_top_c = n_top.copy()
     n_right_c = n_right.copy()
@@ -561,7 +562,7 @@ def run_stage5(scene, carry=None):
         # Standalone: rebuild the Stage 4 end-state statically.
         circles = build_frequency_circles(STAGE2)
         width_bar, height_bar, n_top, n_right = build_measure_bars(circles, STAGE4)
-        center = circles.get_center() + UP * (circles.height / 2 + 1.2)
+        center = np.array([n_right.get_center()[0], n_top.get_center()[1], 0.0])
         n2 = Text("N²", font_size=STAGE4["n2_font_size"], weight=BOLD).move_to(center)
         scene.add(circles, width_bar, height_bar, n2)
     else:
